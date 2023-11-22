@@ -5,6 +5,7 @@ from pathlib import Path
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
+import numpy as np
 from numpy import random
 
 from models.experimental import attempt_load
@@ -84,10 +85,29 @@ def detect(save_img=True):
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
+        
+        class_names=["head", "person"]
 
         # Apply Classifier
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
+            
+        bbox_list = pred[:,:4]
+        label_list = [class_names[int(idx)] for idx in pred[:,4]]
+        probs_list = pred[:,5]
+        
+        track_ids = [-1]*len(bbox_list)
+        
+        # Convert to tlbr format
+        tlbr_boxes = bbox_list.copy()
+        tlbr_boxes[:, 2:4] += tlbr_boxes[:, :2]
+        
+        tracks = tracker.update(
+            np.concatenate([tlbr_boxes, probs_list[:, np.newaxis]], axis=1),
+            im0s.shape[:2],
+            im0s.shape[:2]
+        )
+        track_ids = match_detections_with_tracks(tlbr_boxes=tlbr_boxes, track_ids=track_ids, tracks=tracks)
 
         # Process detections
         for i, det in enumerate(pred):  # detections per image
@@ -101,16 +121,11 @@ def detect(save_img=True):
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
             s += '%gx%g ' % img.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-            if len(det):
-                tracks = tracker.update(
-                    det, im0.size, im0.size
-                )
 
+            if len(det):        
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
-
-                track_ids = match_detections_with_tracks(det[:, :4], track_ids=track_ids, tracks=tracks)
-
+                
                 # Print results
                 for c in det[:, -1].unique():
                     n = (det[:, -1] == c).sum()  # detections per class
