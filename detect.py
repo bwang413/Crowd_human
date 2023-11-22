@@ -15,7 +15,13 @@ from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized
 
 
-def detect(save_img=False):
+# Import ByteTrack package
+from cjm_byte_track.core import BYTETracker
+from cjm_byte_track.matching import match_detections_with_tracks
+
+
+
+def detect(save_img=True):
     source, weights, view_img, save_txt, imgsz = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://'))
@@ -56,6 +62,10 @@ def detect(save_img=False):
     names = model.module.names if hasattr(model, 'module') else model.names
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in names]
 
+
+    # Initialize BYTETracker
+    tracker = BYTETracker(track_thresh=0.25, track_buffer=30, match_thresh=0.8)
+
     # Run inference
     if device.type != 'cpu':
         model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
@@ -92,8 +102,14 @@ def detect(save_img=False):
             s += '%gx%g ' % img.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             if len(det):
+                tracks = tracker.update(
+                    det, im0.size, im0.size
+                )
+
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+
+                track_ids = match_detections_with_tracks(det[:, :4], track_ids=track_ids, tracks=tracks)
 
                 # Print results
                 for c in det[:, -1].unique():
@@ -101,7 +117,7 @@ def detect(save_img=False):
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
                 # Write results
-                for *xyxy, conf, cls in reversed(det):
+                for id, *xyxy, conf, cls in reversed(det):
                     if save_txt:  # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                         line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
@@ -109,7 +125,7 @@ def detect(save_img=False):
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
                     if save_img or view_img:  # Add bbox to image
-                        label = f'{names[int(cls)]} {conf:.2f}'
+                        label = f'ID_{id}: {conf:.2f}'
                         if opt.heads or opt.person:
                             if 'head' in label and opt.heads:
                                 plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=3)
