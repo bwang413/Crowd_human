@@ -92,9 +92,9 @@ def detect(save_img=True):
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
             
-        bbox_list = pred[:,:4]
-        label_list = [class_names[int(idx)] for idx in pred[:,4]]
-        probs_list = pred[:,5]
+        bbox_list = pred[0][:,:4]
+        label_list = [class_names[int(idx)] for idx in pred[0][:,4]]
+        probs_list = pred[0][:,5]
         
         track_ids = [-1]*len(bbox_list)
         
