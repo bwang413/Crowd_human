@@ -5,7 +5,6 @@ from pathlib import Path
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
-import numpy as np
 from numpy import random
 
 from models.experimental import attempt_load
@@ -16,13 +15,7 @@ from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized
 
 
-# Import ByteTrack package
-from cjm_byte_track.core import BYTETracker
-from cjm_byte_track.matching import match_detections_with_tracks
-
-
-
-def detect(save_img=True):
+def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://'))
@@ -63,10 +56,6 @@ def detect(save_img=True):
     names = model.module.names if hasattr(model, 'module') else model.names
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in names]
 
-
-    # Initialize BYTETracker
-    tracker = BYTETracker(track_thresh=0.25, track_buffer=30, match_thresh=0.8)
-
     # Run inference
     if device.type != 'cpu':
         model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
@@ -85,29 +74,10 @@ def detect(save_img=True):
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
-        
-        class_names=["head", "person"]
 
         # Apply Classifier
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
-            
-        bbox_list = pred[0][:,:4]
-        label_list = [class_names[int(idx)] for idx in pred[0][:,4]]
-        probs_list = pred[0][:,5]
-        
-        track_ids = [-1]*len(bbox_list)
-        
-        # Convert to tlbr format
-        tlbr_boxes = bbox_list.copy()
-        tlbr_boxes[:, 2:4] += tlbr_boxes[:, :2]
-        
-        tracks = tracker.update(
-            np.concatenate([tlbr_boxes, probs_list[:, np.newaxis]], axis=1),
-            im0s.shape[:2],
-            im0s.shape[:2]
-        )
-        track_ids = match_detections_with_tracks(tlbr_boxes=tlbr_boxes, track_ids=track_ids, tracks=tracks)
 
         # Process detections
         for i, det in enumerate(pred):  # detections per image
@@ -121,18 +91,17 @@ def detect(save_img=True):
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
             s += '%gx%g ' % img.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-
-            if len(det):        
+            if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
-                
+
                 # Print results
                 for c in det[:, -1].unique():
                     n = (det[:, -1] == c).sum()  # detections per class
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
                 # Write results
-                for id, *xyxy, conf, cls in reversed(det):
+                for *xyxy, conf, cls in reversed(det):
                     if save_txt:  # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                         line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
@@ -140,7 +109,7 @@ def detect(save_img=True):
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
                     if save_img or view_img:  # Add bbox to image
-                        label = f'ID_{id}: {conf:.2f}'
+                        label = f'{names[int(cls)]} {conf:.2f}'
                         if opt.heads or opt.person:
                             if 'head' in label and opt.heads:
                                 plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=3)
