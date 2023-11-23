@@ -113,6 +113,7 @@ class Ensemble(nn.ModuleList):
 def attempt_load(weights, map_location=None):
     # Loads an ensemble of models weights=[a,b,c] or a single model weights=[a] or weights=a
     model = Ensemble()
+    print("\n model wegiths are {}".format(weights))
     for w in weights if isinstance(weights, list) else [weights]:
         attempt_download(w)
         model.append(torch.load(w, map_location=map_location)['model'].float().fuse().eval())  # load FP32 model
